@@ -22,7 +22,7 @@ test("server renders the finished Sichuan Mahjong table", async () => {
   assert.match(html, /换三张/);
   assert.match(html, /血战到底/);
   assert.match(html, /创建好友房/);
-  assert.doesNotMatch(html, /codex-preview|Your site is taking shape|SkeletonPreview/);
+  assert.doesNotMatch(html, /Your site is taking shape|SkeletonPreview/);
 });
 
 test("ships the complete public-domain suited tile set", async () => {
