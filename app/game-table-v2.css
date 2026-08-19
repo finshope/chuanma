@@ -380,7 +380,7 @@
 .game-scene .win-copy small { margin-top: 6px; color: #ffd772; font: 800 12px/1 Georgia, serif; }
 
 /* Shared physical face tile. River tiles use one identical body and rotate only as a whole. */
-.game-scene .tile-3d.tile-face {
+:is(.game-scene, .result-panel) .tile-3d.tile-face {
   --tile-width: 44px;
   --tile-height: 58px;
   --tile-surface-height: 46px;
@@ -402,10 +402,10 @@
   box-shadow: inset -1px 0 0 rgba(128, 123, 104, .2), 2px 4px 4px rgba(0, 0, 0, .26);
 }
 
-.game-scene .tile-3d.tile-face::before,
-.game-scene .tile-3d.tile-face::after { content: none; }
+:is(.game-scene, .result-panel) .tile-3d.tile-face::before,
+:is(.game-scene, .result-panel) .tile-3d.tile-face::after { content: none; }
 
-.game-scene .tile-surface {
+:is(.game-scene, .result-panel) .tile-surface {
   position: absolute;
   z-index: 3;
   top: 0;
@@ -422,7 +422,7 @@
   box-shadow: inset 1px 1px 0 rgba(255, 255, 255, .95), inset -1px -1px 2px rgba(157, 148, 124, .12);
 }
 
-.game-scene .tile-surface img {
+:is(.game-scene, .result-panel) .tile-surface img {
   position: relative;
   z-index: 2;
   width: 90%;
@@ -434,7 +434,7 @@
   user-select: none;
 }
 
-.game-scene .tile-front-edge {
+:is(.game-scene, .result-panel) .tile-front-edge {
   position: absolute;
   z-index: 2;
   top: var(--tile-surface-height);
@@ -447,7 +447,7 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72), inset 0 -1px 0 rgba(113, 106, 87, .28);
 }
 
-.game-scene .tile-green-lip {
+:is(.game-scene, .result-panel) .tile-green-lip {
   position: absolute;
   z-index: 4;
   left: 0;
@@ -1144,9 +1144,9 @@
   bottom: 225px;
   min-width: 430px;
 }
-.game-scene .result-layer {
+.game-shell > .result-layer {
   z-index: 100;
-  /* A static scrim is dramatically cheaper than blurring the scaled table. */
+  padding: 24px;
   background: rgba(3, 9, 15, .91);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
@@ -1194,32 +1194,69 @@
 .game-shell > .chat-popover,
 .game-shell > .toast { z-index: 200; }
 
-/* Settlement is a reading surface, not a compact status widget. */
-.game-scene .result-panel {
-  width: 900px;
-  padding: 36px 42px 34px;
+/* Settlement lives outside the scaled board so scrolling never recomposites the table. */
+.game-shell > .result-layer .result-panel {
+  width: min(1040px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  padding: 30px 36px 32px;
   contain: layout paint;
   box-shadow: inset 0 0 0 4px rgba(255, 255, 255, .018), 0 18px 38px rgba(0, 0, 0, .48);
+  overscroll-behavior: contain;
 }
-.game-scene .result-panel h2 { font-size: 34px; }
-.game-scene .result-panel > p:not(.eyebrow) { font-size: 15px; line-height: 1.6; }
-.game-scene .result-panel h3 { margin-top: 26px; font-size: 15px; }
-.game-scene .settlement-ledger { gap: 12px; margin-top: 22px; }
-.game-scene .settlement-row { padding: 18px 20px 16px; }
-.game-scene .settlement-heading strong { font-size: 19px; }
-.game-scene .settlement-heading span { font-size: 13px; }
-.game-scene .settlement-heading b { font-size: 42px; }
-.game-scene .settlement-heading b small { font-size: 14px; }
-.game-scene .fan-patterns { gap: 8px; margin: 13px 0; }
-.game-scene .fan-patterns span { padding: 7px 10px; font-size: 13px; }
-.game-scene .score-formula { padding-top: 13px; }
-.game-scene .score-formula span { font-size: 13px; }
-.game-scene .score-formula strong { font-size: 18px; }
-.game-scene .settlement-row > p { margin-top: 10px; font-size: 12px; }
-.game-scene .empty-settlement { padding: 25px; font-size: 14px; }
-.game-scene .standings { margin-top: 11px; }
-.game-scene .standings div { grid-template-columns: 42px 1fr auto; padding: 15px 11px; }
-.game-scene .standings b { font-size: 21px; }
-.game-scene .standings span { font-size: 16px; }
-.game-scene .standings strong { font-size: 18px; }
-.game-scene .result-panel .gold-cta { min-height: 50px; padding-inline: 28px; font-size: 16px; }
+.game-shell > .result-layer .result-panel h2 { font-size: 34px; }
+.game-shell > .result-layer .result-panel > p:not(.eyebrow) { margin: 6px 0 0; font-size: 15px; line-height: 1.6; }
+.game-shell > .result-layer .result-panel h3 { margin-top: 24px; font-size: 15px; }
+.game-shell > .result-layer .settlement-ledger { gap: 12px; margin-top: 12px; }
+.game-shell > .result-layer .settlement-row { padding: 17px 20px 15px; }
+.game-shell > .result-layer .settlement-heading strong { font-size: 19px; }
+.game-shell > .result-layer .settlement-heading span { font-size: 13px; }
+.game-shell > .result-layer .settlement-heading b { font-size: 38px; }
+.game-shell > .result-layer .settlement-heading b small { font-size: 14px; }
+.game-shell > .result-layer .fan-patterns { gap: 8px; margin: 13px 0; }
+.game-shell > .result-layer .fan-patterns span { padding: 7px 10px; font-size: 13px; }
+.game-shell > .result-layer .score-formula { padding-top: 13px; }
+.game-shell > .result-layer .score-formula span { font-size: 13px; }
+.game-shell > .result-layer .score-formula strong { font-size: 18px; }
+.game-shell > .result-layer .settlement-row > p { margin-top: 10px; font-size: 12px; }
+.game-shell > .result-layer .empty-settlement { padding: 25px; font-size: 14px; }
+.game-shell > .result-layer .standings { margin-top: 11px; }
+.game-shell > .result-layer .standings div { grid-template-columns: 42px 1fr auto; padding: 15px 11px; }
+.game-shell > .result-layer .standings b { font-size: 21px; }
+.game-shell > .result-layer .standings span { font-size: 16px; }
+.game-shell > .result-layer .standings strong { font-size: 18px; }
+
+.result-title-row,
+.result-actions,
+.winning-hand-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.result-title-row { position: sticky; top: -30px; z-index: 8; margin: -30px -36px 0; padding: 26px 36px 14px; background: rgba(13, 46, 39, .98); border-bottom: 1px solid rgba(232, 195, 108, .14); }
+.result-title-row .eyebrow { text-align: left; }
+.result-close { min-height: 38px; padding: 0 18px; color: #dbe5df; border: 1px solid rgba(255, 255, 255, .2); background: rgba(255, 255, 255, .06); cursor: pointer; font-size: 13px; }
+.winning-hand-list { display: grid; gap: 12px; margin-top: 12px; }
+.winning-hand-review { padding: 14px 16px 15px; color: #e8eee9; border: 1px solid rgba(231, 190, 96, .25); border-left: 4px solid #c14f38; background: rgba(0, 0, 0, .18); text-align: left; contain: layout paint; }
+.winning-hand-heading { justify-content: flex-start; margin-bottom: 11px; }
+.winning-hand-heading span { padding: 4px 8px; color: #321e13; border-radius: 3px; background: #dfb75f; font-size: 12px; font-weight: 900; }
+.winning-hand-heading strong { font-size: 18px; }
+.winning-hand-heading small { color: #e8b275; font-size: 13px; }
+.winning-hand-track { display: flex; align-items: flex-end; gap: 12px; padding: 5px 2px 9px; overflow-x: auto; overflow-y: hidden; scrollbar-color: rgba(218, 180, 94, .42) transparent; }
+.result-hand-block { flex: 0 0 auto; }
+.result-hand-block > small { display: block; height: 18px; color: #819a90; font-size: 11px; }
+.result-hand-block > div { display: flex; align-items: flex-end; gap: 1px; }
+.result-meld-block { padding-right: 10px; border-right: 1px solid rgba(255, 255, 255, .1); }
+.result-winning-block { margin-left: 8px; }
+.result-tile { position: relative; display: inline-grid; padding: 2px; border-radius: 5px; }
+.result-tile.is-winning { transform: translateY(-4px); background: rgba(226, 78, 49, .2); outline: 2px solid #efbd63; box-shadow: 0 0 18px rgba(238, 108, 60, .46); }
+.result-tile.is-winning::after { content: "胡"; position: absolute; right: -7px; top: -8px; z-index: 8; width: 21px; height: 21px; display: grid; place-items: center; color: #fff5ca; border: 1px solid #f5ce79; border-radius: 50%; background: #a93627; font: 900 13px "KaiTi", serif; }
+.result-actions { justify-content: flex-end; margin-top: 22px; }
+.result-actions .secondary-cta,
+.result-actions .gold-cta { min-height: 46px; padding-inline: 24px; font-size: 15px; }
+.result-actions > span { color: #91a59c; font-size: 13px; }
+.result-reopen { position: fixed; right: 24px; bottom: 24px; z-index: 190; min-height: 48px; padding: 0 22px; color: #342116; border: 1px solid #f5d88d; border-radius: 4px; background: linear-gradient(#f0d181, #b97b34); box-shadow: 0 12px 28px rgba(0, 0, 0, .38); cursor: pointer; font-size: 15px; font-weight: 900; }
+
+@media (max-width: 720px) {
+  .game-shell > .result-layer { padding: 10px; }
+  .game-shell > .result-layer .result-panel { width: calc(100vw - 20px); max-height: calc(100vh - 20px); padding: 22px 18px 24px; }
+  .result-title-row { top: -22px; margin: -22px -18px 0; padding: 18px 18px 12px; }
+  .game-shell > .result-layer .result-panel h2 { font-size: 27px; }
+  .winning-hand-review { padding-inline: 10px; }
+  .result-reopen { right: 12px; bottom: 12px; }
+}

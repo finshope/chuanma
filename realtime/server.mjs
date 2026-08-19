@@ -184,6 +184,7 @@ function makePlayer(id, name, seat, bot = false) {
     score: 10000,
     hand: [],
     hasDrawnTile: false,
+    lastAcquiredTile: null,
     melds: [],
     voidSuit: null,
     hasWon: false,
@@ -350,6 +351,7 @@ function runInitialDeal(room, index = 0) {
   const player = room.players.find((item) => item.seat === step.seat);
   const tiles = room.deck.splice(0, step.count);
   player.hand.push(...tiles);
+  if (step.kind === "jump") player.lastAcquiredTile = tiles[tiles.length - 1] || null;
   room.dealStage = "dealing";
   room.dealStep = index + 1;
   room.dealSeat = step.seat;
@@ -386,6 +388,7 @@ function beginGame(room) {
   room.players.forEach((player) => {
     player.hand = [];
     player.hasDrawnTile = false;
+    player.lastAcquiredTile = null;
     player.melds = [];
     player.voidSuit = null;
     player.hasWon = false;
@@ -436,7 +439,10 @@ function completeExchange(room) {
   }
 
   for (const player of playersBySeat) {
-    player.hand.push(...incoming.get(player.seat));
+    const receivedTiles = incoming.get(player.seat);
+    player.hand.push(...receivedTiles);
+    if (receivedTiles.length) player.lastAcquiredTile = receivedTiles[receivedTiles.length - 1];
+    else if (player.lastAcquiredTile && !player.hand.includes(player.lastAcquiredTile)) player.lastAcquiredTile = null;
     sortTiles(player.hand);
   }
   room.status = "void";
@@ -463,16 +469,17 @@ function finishGame(room, reason) {
   room.status = "finished";
   room.pendingAction = null;
   room.selfActions = null;
+  const finishedAt = Date.now();
   const standings = [...room.players]
     .sort((a, b) => b.score - a.score)
     .map((player, index) => ({ id: player.id, name: player.name, score: player.score, rank: index + 1, hasWon: player.hasWon, winningFan: player.winningFan }));
-  room.result = { reason, standings, settlements: room.settlements };
+  room.result = { reason, finishedAt, standings, settlements: room.settlements };
   room.lastAction = reason;
-  room.actionAt = Date.now();
+  room.actionAt = finishedAt;
   broadcast(room);
 }
 
-function settleWin(room, winner, type, payers) {
+function settleWin(room, winner, type, payers, winningTile) {
   const fanInfo = evaluateFan(winner, type === "自摸");
   const perPayer = room.base * fanInfo.multiplier;
   const total = perPayer * payers.length;
@@ -488,6 +495,9 @@ function settleWin(room, winner, type, payers) {
     winnerId: winner.id,
     winnerName: winner.name,
     type,
+    winningTile,
+    concealedTiles: sortTiles([...winner.hand]),
+    melds: winner.melds.map((meld) => ({ ...meld, tiles: [...meld.tiles] })),
     loserNames: payers.map((payer) => payer.name),
     patterns: fanInfo.patterns,
     fan: fanInfo.fan,
@@ -520,6 +530,7 @@ function prepareTurn(room, keepCurrentHand = false) {
     if (!drawn) return finishGame(room, "牌墙已摸完，本局流局");
     player.hand.push(drawn);
     player.hasDrawnTile = true;
+    player.lastAcquiredTile = drawn;
     room.lastAction = `${player.name} 摸了一张牌`;
     room.actionAt = Date.now();
   }
@@ -571,6 +582,7 @@ function discardTile(room, player, tile) {
   if (mustDiscardVoid && tileSuit(tile) !== player.voidSuit) return false;
   player.hand.splice(player.hand.indexOf(tile), 1);
   player.hasDrawnTile = false;
+  player.lastAcquiredTile = null;
   sortTiles(player.hand);
   room.discards[player.seat].push(tile);
   room.selfActions = null;
@@ -634,7 +646,7 @@ function resolveResponse(room, player, action) {
     sortTiles(player.hand);
     player.hasDrawnTile = false;
     const discarder = room.players.find((item) => item.seat === pending.discarder);
-    const settlement = settleWin(room, player, "荣和", [discarder]);
+    const settlement = settleWin(room, player, "荣和", [discarder], tile);
     player.hasWon = true;
     player.winningTile = tile;
     room.lastAction = `${player.name} 荣和！${settlement.fan}番 ×${settlement.multiplier}，${discarder.name} 放铳`;
@@ -657,6 +669,7 @@ function resolveResponse(room, player, action) {
   if (action === "peng") {
     player.hand = removeTiles(player.hand, [tile, tile]);
     player.hasDrawnTile = false;
+    player.lastAcquiredTile = null;
     player.melds.push({ type: "peng", tiles: [tile, tile, tile], from: pending.discarder });
     room.pendingAction = null;
     room.turn = player.seat;
@@ -669,6 +682,7 @@ function resolveResponse(room, player, action) {
   if (action === "gang") {
     player.hand = removeTiles(player.hand, [tile, tile, tile]);
     player.hasDrawnTile = false;
+    player.lastAcquiredTile = null;
     player.melds.push({ type: "gang", tiles: [tile, tile, tile, tile], from: pending.discarder });
     applyGangScore(room, player);
     room.pendingAction = null;
@@ -692,10 +706,16 @@ function resolveSelfAction(room, player, action) {
   }
   if (!room.selfActions.actions.includes(action)) return false;
   if (action === "hu") {
+    // Initial hands are sorted before the exchange/void phases, so the dealer's
+    // jump tile must be tracked independently from array order. Normal draws and
+    // kong replacement draws update the same marker in prepareTurn.
+    const winningTile = player.lastAcquiredTile && player.hand.includes(player.lastAcquiredTile)
+      ? player.lastAcquiredTile
+      : player.hand[player.hand.length - 1];
     const payers = activePlayers(room).filter((other) => other.id !== player.id);
-    const settlement = settleWin(room, player, "自摸", payers);
+    const settlement = settleWin(room, player, "自摸", payers, winningTile);
     player.hasWon = true;
-    player.winningTile = player.hand[player.hand.length - 1];
+    player.winningTile = winningTile;
     room.selfActions = null;
     room.lastAction = `${player.name} 自摸！${settlement.fan}番 ×${settlement.multiplier}`;
     room.actionAt = settlement.at;
@@ -710,6 +730,7 @@ function resolveSelfAction(room, player, action) {
     if (!tile) return false;
     player.hand = removeTiles(player.hand, [tile, tile, tile, tile]);
     player.hasDrawnTile = false;
+    player.lastAcquiredTile = null;
     player.melds.push({ type: "gang", tiles: [tile, tile, tile, tile], from: player.seat });
     applyGangScore(room, player);
     room.selfActions = null;

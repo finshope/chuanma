@@ -20,6 +20,9 @@ type Settlement = {
   base: number;
   perPayer: number;
   total: number;
+  winningTile: string;
+  concealedTiles: string[];
+  melds: Meld[];
 };
 type PlayerState = {
   id: string;
@@ -67,7 +70,7 @@ type Snapshot = {
   discards: string[][];
   chat: { id: number; name: string; text: string }[];
   settlements: Settlement[];
-  result: { reason: string; standings: { id: string; name: string; score: number; rank: number; hasWon: boolean; winningFan: number | null }[]; settlements: Settlement[] } | null;
+  result: { finishedAt: number; reason: string; standings: { id: string; name: string; score: number; rank: number; hasWon: boolean; winningFan: number | null }[]; settlements: Settlement[] } | null;
 };
 
 const SUIT_NAMES: Record<Suit, string> = { Man: "万", Pin: "筒", Sou: "条" };
@@ -76,6 +79,13 @@ const LOGICAL_WIDTH = 1536;
 const LOGICAL_HEIGHT = 864;
 const tileSrc = (name: string) => `/tiles/${name}.png`;
 const tileLabel = (name: string) => `${name.slice(3)}${SUIT_NAMES[name.slice(0, 3) as Suit]}`;
+const TILE_SUIT_ORDER: Record<Suit, number> = { Man: 0, Pin: 1, Sou: 2 };
+const sortTilesForDisplay = (tiles: string[]) => [...tiles].sort((left, right) => {
+  const leftSuit = left.slice(0, 3) as Suit;
+  const rightSuit = right.slice(0, 3) as Suit;
+  return TILE_SUIT_ORDER[leftSuit] - TILE_SUIT_ORDER[rightSuit]
+    || Number(left.slice(3)) - Number(right.slice(3));
+});
 
 const demoPlayers: PlayerState[] = [
   { id: "demo-self", name: "我", seat: 0, bot: false, online: true, ready: true, score: 11160, handCount: 14, hasDrawnTile: true, melds: [], voidSuit: "Pin", hasWon: false, winningTile: null, winningFan: null },
@@ -549,15 +559,105 @@ function FanReveal({ settlement }: { settlement?: Settlement }) {
   );
 }
 
-function ResultPanel({ snapshot, send }: { snapshot: Snapshot; send: (payload: Record<string, unknown>) => void }) {
+function TimedFanReveal({ settlement, status }: { settlement?: Settlement; status: Snapshot["status"] }) {
+  const [expiredId, setExpiredId] = useState<string | null>(null);
+  const settlementId = settlement?.id;
+  const settlementAt = settlement?.at;
+  const visible = status !== "finished" && !!settlement && expiredId !== settlementId;
+
+  useEffect(() => {
+    if (!settlementId || settlementAt === undefined || status === "finished") return;
+    const remaining = Math.max(0, 4200 - (Date.now() - settlementAt));
+    const timer = setTimeout(() => setExpiredId(settlementId), remaining);
+    return () => clearTimeout(timer);
+  }, [settlementAt, settlementId, status]);
+
+  return <FanReveal settlement={visible ? settlement : undefined} />;
+}
+
+function TurnStatus({ status, lastAction, actionAt }: { status: Snapshot["status"]; lastAction: string; actionAt: number }) {
+  const active = status === "play";
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!active) return;
+    const kickoff = setTimeout(() => setNow(Date.now()), 0);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      clearTimeout(kickoff);
+      clearInterval(timer);
+    };
+  }, [active, actionAt]);
+
+  const countdown = active ? Math.max(0, 15 - Math.floor((now - actionAt) / 1000)) : 15;
+  return (
+    <>
+      <div className="turn-notice"><span className="pulse-dot" />{lastAction}<strong>{active ? countdown : ""}</strong></div>
+      {active && <div className="turn-timer" aria-label={`剩余操作时间 ${countdown} 秒`}><span>{String(countdown).padStart(2, "0")}</span></div>}
+    </>
+  );
+}
+
+function ResultTile({ tile, winning = false }: { tile: string; winning?: boolean }) {
+  return (
+    <span className={`result-tile${winning ? " is-winning" : ""}`} aria-label={`${winning ? "胡牌 " : ""}${tileLabel(tile)}`}>
+      <TileImage name={tile} />
+    </span>
+  );
+}
+
+function WinningHandReview({ settlement, order }: { settlement: Settlement; order: number }) {
+  const concealed = sortTilesForDisplay(settlement.concealedTiles || []);
+  const winningIndex = concealed.lastIndexOf(settlement.winningTile);
+  if (winningIndex >= 0) concealed.splice(winningIndex, 1);
+
+  return (
+    <article className="winning-hand-review">
+      <div className="winning-hand-heading">
+        <span>第 {order} 胡</span>
+        <strong>{settlement.winnerName}</strong>
+        <small>{settlement.type} · {settlement.fan} 番</small>
+      </div>
+      <div className="winning-hand-track" aria-label={`${settlement.winnerName}的胡牌牌型`}>
+        {(settlement.melds || []).map((meld, meldIndex) => (
+          <div className="result-hand-block result-meld-block" key={`${meld.type}-${meldIndex}`}>
+            <small>{meld.type === "gang" ? "杠" : "碰"}</small>
+            <div>{meld.tiles.map((tile, tileIndex) => <ResultTile key={`${tile}-${tileIndex}`} tile={tile} />)}</div>
+          </div>
+        ))}
+        <div className="result-hand-block result-concealed-block">
+          <small>暗手</small>
+          <div>{concealed.map((tile, index) => <ResultTile key={`${tile}-${index}`} tile={tile} />)}</div>
+        </div>
+        <div className="result-hand-block result-winning-block">
+          <small>胡牌</small>
+          <div><ResultTile tile={settlement.winningTile} winning /></div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ResultPanel({ snapshot, send, close }: { snapshot: Snapshot; send: (payload: Record<string, unknown>) => void; close: () => void }) {
   if (snapshot.status !== "finished" || !snapshot.result) return null;
   const isHost = snapshot.hostId === snapshot.selfId;
   return (
     <div className="modal-layer result-layer">
       <section className="result-panel">
-        <p className="eyebrow">ROUND COMPLETE</p>
-        <h2>本局结算</h2>
+        <div className="result-title-row">
+          <div><p className="eyebrow">ROUND COMPLETE</p><h2>本局结算</h2></div>
+          <button className="result-close" type="button" onClick={close}>返回牌桌</button>
+        </div>
         <p>{snapshot.result.reason}</p>
+        {!!snapshot.result.settlements.length && (
+          <>
+            <h3>胡牌确认 · 按先后顺序</h3>
+            <div className="winning-hand-list">
+              {snapshot.result.settlements.map((settlement, index) => <WinningHandReview key={settlement.id} settlement={settlement} order={index + 1} />)}
+            </div>
+          </>
+        )}
+        <h3>番数明细</h3>
         <div className="settlement-ledger">
           {snapshot.result.settlements.length ? snapshot.result.settlements.map((settlement) => <SettlementBreakdown key={settlement.id} settlement={settlement} />) : <p className="empty-settlement">本局无人胡牌，未产生番数结算</p>}
         </div>
@@ -567,7 +667,10 @@ function ResultPanel({ snapshot, send }: { snapshot: Snapshot; send: (payload: R
             <div key={item.id} className={item.id === snapshot.selfId ? "is-self" : ""}><b>{item.rank}</b><span>{item.name}{item.hasWon ? ` · ${item.winningFan ?? 0}番` : ""}</span><strong>{item.score.toLocaleString()}</strong></div>
           ))}
         </div>
-        {isHost ? <button className="gold-cta" type="button" onClick={() => send({ type: "restart" })}>再来一局</button> : <span>等待房主开始下一局</span>}
+        <div className="result-actions">
+          <button className="secondary-cta" type="button" onClick={close}>返回牌桌</button>
+          {isHost ? <button className="gold-cta" type="button" onClick={() => send({ type: "restart" })}>再来一局</button> : <span>等待房主开始下一局</span>}
+        </div>
       </section>
     </div>
   );
@@ -599,7 +702,7 @@ export default function GameClient() {
   const [selected, setSelected] = useState<number[]>([]);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [clock, setClock] = useState(0);
+  const [dismissedResultKey, setDismissedResultKey] = useState("");
   const [scale, setScale] = useState(0);
   const state = snapshot || DEMO;
   const selfSeat = snapshot?.players.find((player) => player.id === snapshot.selfId)?.seat ?? 0;
@@ -608,10 +711,6 @@ export default function GameClient() {
     const timer = setTimeout(() => setSelected([]), 0);
     return () => clearTimeout(timer);
   }, [snapshot?.status, snapshot?.roomCode]);
-  useEffect(() => {
-    const timer = setInterval(() => setClock(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
   useEffect(() => {
     const fitSceneToWindow = () => {
       const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
@@ -634,18 +733,15 @@ export default function GameClient() {
     state.players.forEach((player) => map.set(positionForSeat(player.seat), player));
     return map;
   }, [positionForSeat, state.players]);
-  const countdown = snapshot && clock >= state.actionAt ? Math.max(0, 15 - Math.floor((clock - state.actionAt) / 1000)) : 15;
   const self = snapshot?.players.find((player) => player.id === snapshot.selfId);
   const isMyTurn = snapshot?.status === "play" && snapshot.turn === self?.seat && !snapshot.availableActions.length;
   const hasPendingDiscard = state.status === "play" && !!state.pendingTile && state.pendingDiscarderSeat !== null && state.availableActions.length > 0;
   const pendingDiscarder = hasPendingDiscard ? state.players.find((player) => player.seat === state.pendingDiscarderSeat) : undefined;
   const lastSettlement = snapshot?.settlements.at(-1);
-  // The transient fan banner must not overlap the finished-round ledger. Apart
-  // from obscuring the numbers, animating it over a full-screen result surface
-  // forces the browser to composite two large layers at once.
-  const visibleSettlement = state.status !== "finished" && lastSettlement && clock >= lastSettlement.at && clock - lastSettlement.at < 4200
-    ? lastSettlement
-    : undefined;
+  const resultKey = snapshot?.status === "finished" && snapshot.result
+    ? `${snapshot.roomCode}:${snapshot.result.finishedAt}`
+    : "";
+  const resultOpen = !!resultKey && dismissedResultKey !== resultKey;
 
   const toggleTile = (index: number) => {
     if (snapshot?.status === "exchange") {
@@ -680,7 +776,7 @@ export default function GameClient() {
               <span><strong>蜀牌局</strong><small>四川麻将 · 血战到底</small></span>
             </button>
             <button className="room-meta room-meta-button" type="button" onClick={copyRoom} disabled={!snapshot} title="复制房号">
-              <strong>血流成河 · 好友房</strong>
+              <strong>血战到底 · 好友房</strong>
               <span>房间：{state.roomCode}</span>
               <span>局数：{state.round}/{state.maxRounds}局</span>
               <span>底分：{state.base}</span>
@@ -731,9 +827,8 @@ export default function GameClient() {
               <span className="dice">{(state.dice ?? [5, 2]).map((value) => ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"][value - 1]).join(" ")}</span>
             </div>
 
-            <div className="turn-notice"><span className="pulse-dot" />{state.lastAction}<strong>{state.status === "play" ? countdown : ""}</strong></div>
-            {state.status === "play" && <div className="turn-timer" aria-label={`剩余操作时间 ${countdown} 秒`}><span>{String(countdown).padStart(2, "0")}</span></div>}
-            <FanReveal settlement={visibleSettlement} />
+            <TurnStatus status={state.status} lastAction={state.lastAction} actionAt={state.actionAt} />
+            <TimedFanReveal settlement={lastSettlement} status={state.status} />
 
             {!!snapshot?.hand.length && (
               <div className="my-hand" aria-label="你的手牌">
@@ -763,7 +858,6 @@ export default function GameClient() {
             )}
 
             {snapshot && <PhasePrompt snapshot={snapshot} selected={selected} setSelected={setSelected} send={send} />}
-            {snapshot && <ResultPanel snapshot={snapshot} send={send} />}
               </div>
             </div>
           </section>
@@ -772,6 +866,10 @@ export default function GameClient() {
 
       {!snapshot && <EntryPanel name={name} setName={setName} enter={enter} connected={connected} />}
       {snapshot?.status === "lobby" && <LobbyPanel snapshot={snapshot} send={send} copyRoom={copyRoom} />}
+      {snapshot && resultOpen && <ResultPanel snapshot={snapshot} send={send} close={() => setDismissedResultKey(resultKey)} />}
+      {snapshot?.status === "finished" && snapshot.result && !resultOpen && (
+        <button className="result-reopen" type="button" onClick={() => setDismissedResultKey("")}>查看本局结算</button>
+      )}
       {rulesOpen && <RulesPanel close={() => setRulesOpen(false)} />}
 
       {chatOpen && (
